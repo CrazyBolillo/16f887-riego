@@ -267,7 +267,7 @@ void __interrupt() handle_interrupt() {
             uart_write(humid_str);
         }
         if (state == ST_ON) {
-            if (humidity >= trigger) {
+            if ((humidity / 1000) >= trigger) {
                 WATER_VALVE = 0;
             }
             else {
