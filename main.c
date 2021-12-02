@@ -24,6 +24,7 @@
 #define ADC_TEMP_CHN 0
 #define ADC_HUMI_CHN 1
 float HUMIDITY_WET = 1.281;
+float HUMIDITY_DIFF = 0.984;
 float ADC_RES = 0.00488758;
 uint16_t adc_read_value;
 uint16_t temperature;
@@ -225,12 +226,12 @@ void read_humid(void) {
         humidity = 1000;
     }
     else {
-        humidity = (uint16_t) ((humidity_level / 0.00984) * 10);
+        humidity = (uint16_t) ((HUMIDITY_DIFF - humidity_level) * 1000);
     }
-    humid_str[0] = 48 + ((uint8_t)(temperature / 1000));
-    humid_str[1] = 48 + ((uint8_t)((temperature / 100) % 10));
-    humid_str[2] = 48 + ((uint8_t)((temperature / 10) % 10));
-    humid_str[4] = 48 + ((uint8_t)(temperature % 10));
+    humid_str[0] = 48 + ((uint8_t)(humidity / 1000));
+    humid_str[1] = 48 + ((uint8_t)((humidity / 100) % 10));
+    humid_str[2] = 48 + ((uint8_t)((humidity / 10) % 10));
+    humid_str[4] = 48 + ((uint8_t)(humidity % 10));
 }
 
 void uart_write(char *string) {
