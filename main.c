@@ -266,6 +266,14 @@ void __interrupt() handle_interrupt() {
         else {
             uart_write(humid_str);
         }
+        if (state == ST_ON) {
+            if (humidity >= trigger) {
+                WATER_VALVE = 0;
+            }
+            else {
+                WATER_VALVE = 1;
+            }
+        }
         PIR1bits.TMR1IF = 0;
         TMR1H = 0x80;
         T1CONbits.TMR1ON = 1;
