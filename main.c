@@ -271,11 +271,11 @@ void menu_loop_bichar(unsigned char *menu, uint8_t eeprom_addr, char opt1, char 
                     *menu = menu_buffer;
                     eeprom_write(eeprom_addr, *menu);
                     update_menu_char(*menu);
-                    lcd_display(true, false, false);
                     update_state();
-                    return;
+                    
                 }
-                break;
+                lcd_display(true, false, false);
+                return;
             case UP_BTN:
             case DW_BTN:
                 if (menu_buffer == opt1) {
