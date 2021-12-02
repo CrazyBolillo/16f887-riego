@@ -26,23 +26,31 @@
 
 uint16_t adc_read_value;
 uint16_t temperature;
+char temp_str[5] = {'0', '0', '.', '0', '0'};
 uint16_t humidity;
+char humid_str[5] = {'0', '0', '.', '0', '0'};
+
+#define EEPROM_ST 0x00
+#define ST_ON 'Y'
+#define ST_OFF 'N'
 
 #define EEPROM_SRL 0x01
 #define SRL_HUMID 'H'
 #define SRL_TEMP 'T'
 
 unsigned char serial;
+unsigned char state;
 
 #define SEL_BTN 3
 #define UP_BTN 2
 #define DW_BTN 1
 #define is_pushed(x, val) __delay_ms(32); if (x != 0) { return 0; } while (x == 0); return val;
 #define is_odd(x) ((x & 1) == 1)
-#define MENU_SIZE 1
+#define MENU_SIZE 2
 #define MENU_OPTION 10
 
 uint8_t menu_position = 0;
+uint8_t menu_buffer = 0;
 uint8_t pushed_button;
 
 void set_adc_channel(uint8_t  channel);
@@ -51,6 +59,7 @@ void read_humid(void);
 void uart_write(char *string);
 void show_menu_arrows(void);
 void select_menu(void);
+void update_menu_char(char value);
 void write_menu_line(char *string, char value, bool top, bool selected);
 uint8_t read_btn(void);
 
@@ -85,18 +94,33 @@ void main(void) {
     INTCONbits.PEIE = 1;
     PIE1bits.TMR1IE = 1;
     
+    // Read settings
+    state = eeprom_read(EEPROM_ST);
+    if ((state != ST_ON) && (state != ST_OFF)) {
+        state = ST_ON;
+        eeprom_write(state, state);
+    }
+    if (state == ST_ON) {
+        PORTCbits.RC5 = 1;
+    }
+    else {
+        PORTCbits.RC5 = 0;
+    }
+    
     serial = eeprom_read(EEPROM_SRL);
-    if ((serial != 'H') && (serial != 'T')) {
+    if ((serial != SRL_HUMID) && (serial != SRL_TEMP)) {
         serial = SRL_TEMP;
         eeprom_write(EEPROM_SRL, serial);
     }
     
     lcd_init(true, false, false); // Display on. Cursor and blinking off.
     show_menu_arrows(); // Show up and down menu arrows
-    write_menu_line("Serial: ", serial, true, true);
+    write_menu_line("On: ", state, true, true);
+    write_menu_line("Serial: ", serial, false, false);
     
     T1CONbits.TMR1ON = 1;
     while (1) {
+        MENU_START:
         pushed_button = read_btn();
         if (pushed_button == SEL_BTN) {
             if (is_odd(menu_position)) {
@@ -106,13 +130,35 @@ void main(void) {
                 lcd_move_cursor(0x00 + MENU_OPTION);
             }
             lcd_display(true, false, true);
-            while (1) {
-                pushed_button = read_btn();
-                if (pushed_button == SEL_BTN) {
-                    // TODO -- Save settings
-                    lcd_display(true, false, false);
+            switch (menu_position) {
+                case 0: // Status 
+                    menu_buffer = state;
+                    while (1) {
+                        pushed_button = read_btn();
+                        switch (pushed_button) {
+                            case SEL_BTN:
+                                if (menu_buffer != state) {
+                                    state = menu_buffer;
+                                    eeprom_write(EEPROM_ST, state);
+                                    update_menu_char(state);
+                                    lcd_display(true, false, false);
+                                    goto MENU_START;
+                                }
+                                break;
+                            case UP_BTN:
+                            case DW_BTN:
+                                if (menu_buffer == ST_ON) {
+                                    menu_buffer = ST_OFF;
+                                }
+                                else {
+                                    menu_buffer = ST_ON;
+                                }
+                                update_menu_char(state);
+                                break;
+                        }
+                        
+                    }
                     break;
-                }
             }
         }
         else if (pushed_button == UP_BTN) {
@@ -145,6 +191,12 @@ void __interrupt() handle_interrupt() {
         T1CONbits.TMR1ON = 0;
         read_temp();
         read_humid();
+        if (serial == SRL_TEMP) {
+            uart_write(temp_str);
+        }
+        PIR1bits.TMR1IF = 0;
+        TMR1H = 0x80;
+        T1CONbits.TMR1ON = 1;
     }
 }
 
@@ -167,6 +219,10 @@ void read_temp(void) {
     set_adc_channel(ADC_TEMP_CHN);
     read_adc();
     temperature = (uint16_t) (adc_read_value * 48.87585533);
+    temp_str[0] = 48 + ((uint8_t)(temperature / 1000));
+    temp_str[1] = 48 + ((uint8_t)((temperature / 100) % 10));
+    temp_str[3] = 48 + ((uint8_t)((temperature / 10) % 10));
+    temp_str[4] = 48 + ((uint8_t)(temperature % 10));
 }
 
 void read_humid(void) {
@@ -176,11 +232,15 @@ void read_humid(void) {
 }
 
 void uart_write(char *string) {
-    while (*string != '\0') {
+    for(uint8_t count = 0; count != 5; count++) {
         while (PIR1bits.TXIF == 0);
         TXREG = *string;
         string++;
     }
+    while (PIR1bits.TXIF == 0);
+    TXREG = '\r';
+    while (PIR1bits.TXIF == 0);
+    TXREG = '\n';
 }
 
 void select_menu(void) {
@@ -196,6 +256,16 @@ void select_menu(void) {
         lcd_move_cursor(0x40);
         lcd_write_char(SELECT_ARROW);
     }
+}
+
+void update_menu_char(char value) {
+    if (is_odd(menu_position)) {
+        lcd_move_cursor(0x40 + MENU_OPTION);
+    }
+    else {
+        lcd_move_cursor(0x00 + MENU_OPTION);
+    }
+    lcd_write_char(value);
 }
 
 void write_menu_line(char *string, char value, bool top, bool selected) {
