@@ -24,38 +24,49 @@
 #define ADC_TEMP_CHN 0
 #define ADC_HUMI_CHN 1
 float HUMIDITY_WET = 1.281;
-float HUMIDITY_DIFF = 0.984;
+float HUMIDITY_DIFF = 0.930;
 float ADC_RES = 0.00488758;
 uint16_t adc_read_value;
 uint16_t temperature;
-char temp_str[5] = {'0', '0', '.', '0', '0'};
+char temp_str[6] = {'0', '0', '.', '0', '0', '\0'};
 uint16_t humidity;
 float humidity_voltage;
 float humidity_level;
-char humid_str[5] = {'0', '0', '0', '.', '0'};
+char humid_str[6] = {'0', '0', '0', '.', '0', '\0'};
 
 #define EEPROM_ST 0x00
 #define ST_ON 'Y'
 #define ST_OFF 'N'
+#define ST_LEGEND "On: "
 
 #define EEPROM_SRL 0x01
 #define SRL_HUMID 'H'
 #define SRL_TEMP 'T'
+#define SRL_LEGEND "Serial: "
+
+#define EEPROM_TRIG 0x02
+#define TRIG_LEGEND "Trigger: "
+
+#define DATA_LEGEND "Show data"
 
 unsigned char serial;
 unsigned char state;
+uint8_t trigger;
 
 #define SEL_BTN 3
 #define UP_BTN 2
 #define DW_BTN 1
 #define is_pushed(x, val) __delay_ms(32); if (x != 0) { return 0; } while (x == 0); return val;
 #define is_odd(x) ((x & 1) == 1)
-#define MENU_SIZE 2
+#define MENU_SIZE 4
 #define MENU_OPTION 10
 
-uint8_t menu_position = 0;
+uint8_t menu_position = 1;
+uint8_t displayed_menus = 12; // First digit represents top menu. Second one bottom menu.
 uint8_t menu_buffer = 0;
 uint8_t pushed_button;
+
+#define WATER_VALVE PORTCbits.RC1 = PORTCbits.RC2
 
 void menu_loop_bichar(unsigned char *menu, uint8_t eeprom_addr, char opt1, char opt2);
 void update_state(void);
@@ -65,8 +76,8 @@ void read_humid(void);
 void uart_write(char *string);
 void show_menu_arrows(void);
 void select_menu(void);
-void update_menu_char(char value);
-void write_menu_line(char *string, char value, bool top, bool selected);
+void update_menu_char(uint8_t cursor, char value);
+void write_menu_line(char *string, char value, bool top, bool selected, bool is_int);
 uint8_t read_btn(void);
 
 void main(void) {
@@ -114,52 +125,100 @@ void main(void) {
         eeprom_write(EEPROM_SRL, serial);
     }
     
-    lcd_init(true, false, false); // Display on. Cursor and blinking off.
+    trigger = eeprom_read(EEPROM_TRIG);
+    if (trigger > 100) {
+        trigger = 10;
+    }
+    
+    lcd_init(true, false, false); // Display on. Cursor and blinking off
+    write_menu_line(ST_LEGEND, state, true, true, false);
+    write_menu_line(SRL_LEGEND, serial, false, false, false);
     show_menu_arrows(); // Show up and down menu arrows
-    write_menu_line("On: ", state, true, true);
-    write_menu_line("Serial: ", serial, false, false);
     
     T1CONbits.TMR1ON = 1;
     while (1) {
         MENU_START:
         pushed_button = read_btn();
         if (pushed_button == SEL_BTN) {
-            if (is_odd(menu_position)) {
-                lcd_move_cursor(0x40 + MENU_OPTION);
-            }
-            else {
-                lcd_move_cursor(0x00 + MENU_OPTION);
-            }
             lcd_display(true, false, true);
             switch (menu_position) {
-                case 0: // Status 
+                case 1: // Status 
                     menu_loop_bichar(&state, EEPROM_ST, ST_ON, ST_OFF);
+                    update_state();
                     break;
-                case 1: // Serial
+                case 2: // Serial
                     menu_loop_bichar(&serial, EEPROM_SRL, SRL_TEMP, SRL_HUMID);
+                    break;
+                case 3: // Trigger
+                    break;
+                case 4: // Show data
+                    lcd_clear_display();
+                    lcd_display(true, false, false);
+                    lcd_write_string("Temp:         C");
+                    lcd_move_cursor(0x40);
+                    lcd_write_string("Humedad:      %");
+                    pushed_button = read_btn();
+                    while (pushed_button != SEL_BTN) {
+                        pushed_button = read_btn();
+                        lcd_move_cursor(0x09);
+                        lcd_write_string(temp_str);
+                        lcd_move_cursor(0x49);
+                        lcd_write_string(humid_str);
+                    }
+                    lcd_clear_display();
+                    displayed_menus = 12;
+                    menu_position = 1;
+                    write_menu_line(ST_LEGEND, state, true, true, false);
+                    write_menu_line(SRL_LEGEND, serial, false, false, false);
+                    show_menu_arrows(); // Show up and down menu arrows
+                    __delay_ms(200);
                     break;
             }
         }
         else if (pushed_button == UP_BTN) {
-            if (menu_position > 0) {
-                if (is_odd(menu_position)) {
-                    menu_position--;
-                    select_menu();
+            if (menu_position > 1) {
+                switch (displayed_menus) {
+                    case 23:
+                        if (menu_position == 2) {
+                            write_menu_line(ST_LEGEND, state, true, true, false);
+                            write_menu_line(SRL_LEGEND, serial, false, false, false);
+                            displayed_menus = 12;
+                        }
+                        break;
+                    case 34:
+                        if (menu_position == 3) {
+                            write_menu_line(SRL_LEGEND, serial, true, true, false);
+                            write_menu_line(TRIG_LEGEND, trigger, false, false, true);
+                            displayed_menus = 23;
+                        }
+                        break;
                 }
-                else {
-                    //TODO -- Need to update menu
-                }
+                menu_position--;
+                select_menu();
+                show_menu_arrows();
             }
         }
         else if (pushed_button == DW_BTN) {
-            if (menu_position < (MENU_SIZE - 1)) {
-                if (is_odd(menu_position)) {
-                    // TODO -- Need to update menu
+            if (menu_position < MENU_SIZE) {
+                switch (displayed_menus) {
+                    case 12:
+                        if (menu_position == 2) {
+                            write_menu_line(SRL_LEGEND, serial, true, false, false);
+                            write_menu_line(TRIG_LEGEND, trigger, false, true, true);
+                            displayed_menus = 23;
+                        }
+                        break;
+                    case 23:
+                        if (menu_position == 3) {
+                            write_menu_line(TRIG_LEGEND, trigger, true, false, true);
+                            write_menu_line(DATA_LEGEND, ' ', false, true, false);
+                            displayed_menus = 34;
+                        }
+                        break;
                 }
-                else {
-                    menu_position++;
-                    select_menu();
-                }
+                menu_position++;
+                select_menu();
+                show_menu_arrows();
             }
         }
     }
@@ -188,6 +247,7 @@ void update_state(void) {
     }
     else {
         PORTCbits.RC5 = 0;
+        WATER_VALVE = 0;
     }
 }
 
@@ -247,22 +307,73 @@ void uart_write(char *string) {
 }
 
 void select_menu(void) {
-    if ((menu_position & 0x01) == 0) {
-        lcd_move_cursor(0x40);
-        lcd_write_char(' ');
-        lcd_move_cursor(0x00);
-        lcd_write_char(SELECT_ARROW);
-    }
-    else {
-        lcd_move_cursor(0x00);
-        lcd_write_char(' ');
-        lcd_move_cursor(0x40);
-        lcd_write_char(SELECT_ARROW);
+    switch (displayed_menus) {
+        case 12:
+            if (is_odd(menu_position)) {
+                lcd_move_cursor(0x40);
+                lcd_write_char(' ');
+                lcd_move_cursor(0x00);
+                lcd_write_char(SELECT_ARROW);
+            }
+            else {
+                lcd_move_cursor(0x00);
+                lcd_write_char(' ');
+                lcd_move_cursor(0x40);
+                lcd_write_char(SELECT_ARROW);
+            }
+            break;
+        case 23:
+            if (is_odd(menu_position)) {
+                lcd_move_cursor(0x00);
+                lcd_write_char(' ');
+                lcd_move_cursor(0x40);
+                lcd_write_char(SELECT_ARROW);
+            }
+            else {
+                lcd_move_cursor(0x40);
+                lcd_write_char(' ');
+                lcd_move_cursor(0x00);
+                lcd_write_char(SELECT_ARROW);
+            }
+            break;
+        case 34:
+            if (is_odd(menu_position)) {
+                lcd_move_cursor(0x40);
+                lcd_write_char(' ');
+                lcd_move_cursor(0x00);
+                lcd_write_char(SELECT_ARROW);
+            }
+            else {
+                lcd_move_cursor(0x00);
+                lcd_write_char(' ');
+                lcd_move_cursor(0x40);
+                lcd_write_char(SELECT_ARROW);
+            }
+            break;
     }
 }
 
 void menu_loop_bichar(unsigned char *menu, uint8_t eeprom_addr, char opt1, char opt2) {
     menu_buffer = *menu;
+    uint8_t cursor = 0x40;
+    switch (displayed_menus) {
+        case 12:
+            if (is_odd(menu_position)) {
+                cursor = 0x00;
+            }
+            break;
+        case 23:
+            if (!is_odd(menu_position)) {
+                cursor = 0x00;
+            }
+            break;
+        case 34:
+            if (is_odd(menu_position)) {
+                cursor = 0x00;
+            }
+            break;
+    }
+    lcd_move_cursor(cursor);
     while (1) {
         pushed_button = read_btn();
         switch (pushed_button) {
@@ -270,8 +381,7 @@ void menu_loop_bichar(unsigned char *menu, uint8_t eeprom_addr, char opt1, char 
                 if (menu_buffer != *menu) {
                     *menu = menu_buffer;
                     eeprom_write(eeprom_addr, *menu);
-                    update_menu_char(*menu);
-                    update_state();
+                    update_menu_char(cursor, *menu);
                     
                 }
                 lcd_display(true, false, false);
@@ -284,24 +394,20 @@ void menu_loop_bichar(unsigned char *menu, uint8_t eeprom_addr, char opt1, char 
                 else {
                     menu_buffer = opt1;
                 }
-                update_menu_char(menu_buffer);
+                update_menu_char(cursor, menu_buffer);
                 break;
         }
 
     }
 }
 
-void update_menu_char(char value) {
-    uint8_t cursor = 0x00;
-    if (is_odd(menu_position)) {
-        cursor = 0x40;
-    }
+void update_menu_char(uint8_t cursor, char value) {
     lcd_move_cursor(cursor + MENU_OPTION);
     lcd_write_char(value);
-    lcd_move_cursor(cursor + MENU_OPTION);
+    lcd_move_cursor(cursor);
 }
 
-void write_menu_line(char *string, char value, bool top, bool selected) {
+void write_menu_line(char *string, char value, bool top, bool selected, bool is_int) {
     uint8_t cursor = 0x00;
     uint8_t select = ' ';
     if (top == false) {
@@ -316,7 +422,14 @@ void write_menu_line(char *string, char value, bool top, bool selected) {
     lcd_write_char(select);
     lcd_write_string(string);
     lcd_move_cursor(cursor + MENU_OPTION);
-    lcd_write_char(value);
+    if (is_int == true) {
+        lcd_write_char(48 + ((uint8_t)((value / 100) % 10)));
+        lcd_write_char(48 + ((uint8_t)((value / 10) % 10)));
+        lcd_write_char(48 + ((uint8_t)(value % 10)));
+    }
+    else {
+        lcd_write_char(value);
+    }
 }
 
 uint8_t read_btn(void) {
@@ -333,18 +446,23 @@ uint8_t read_btn(void) {
 }
 
 void show_menu_arrows(void) {
-    lcd_move_cursor(0x0F);
-    if (menu_position > 1) {
-        lcd_write_char(UP_ARROW);
-    }
-    else {
-        lcd_write_char(' ');
-    }
-    if (menu_position < (MENU_SIZE -1)) {
-        lcd_move_cursor(0x4F);
-        lcd_write_char(DOWN_ARROW);
-    }
-    else {
-        lcd_write_char(' ');
+    switch (displayed_menus) {
+        case 12:
+            lcd_move_cursor(0x0F);
+            lcd_write_char(' ');
+            lcd_move_cursor(0x4F);
+            lcd_write_char(DOWN_ARROW);
+            break;
+        case 23:
+            lcd_move_cursor(0x0F);
+            lcd_write_char(UP_ARROW);
+            lcd_move_cursor(0x4F);
+            lcd_write_char(DOWN_ARROW);
+            break;
+        case 34:
+            lcd_move_cursor(0x0F);
+            lcd_write_char(UP_ARROW);
+            lcd_move_cursor(0x4F);
+            lcd_write_char(' ');
     }
 }
