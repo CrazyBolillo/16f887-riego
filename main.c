@@ -21,15 +21,17 @@
 
 #define LCD_BLANK "              "
 
-#define EEPROM_MODE 0x00
-#define MODE_ANALYSIS 'A'
-#define MODE_RTC 'R'
+#define ADC_TEMP_CHN 0
+#define ADC_HUMI_CHN 1
+
+uint16_t adc_read_value;
+uint16_t temperature;
+uint16_t humidity;
 
 #define EEPROM_SRL 0x01
 #define SRL_HUMID 'H'
 #define SRL_TEMP 'T'
 
-unsigned char mode;
 unsigned char serial;
 
 #define SEL_BTN 3
@@ -37,12 +39,16 @@ unsigned char serial;
 #define DW_BTN 1
 #define is_pushed(x, val) __delay_ms(32); if (x != 0) { return 0; } while (x == 0); return val;
 #define is_odd(x) ((x & 1) == 1)
-#define MENU_LAST 1
+#define MENU_SIZE 1
 #define MENU_OPTION 10
 
 uint8_t menu_position = 0;
 uint8_t pushed_button;
 
+void set_adc_channel(uint8_t  channel);
+void read_temp(void);
+void read_humid(void);
+void uart_write(char *string);
 void show_menu_arrows(void);
 void select_menu(void);
 void write_menu_line(char *string, char value, bool top, bool selected);
@@ -58,12 +64,26 @@ void main(void) {
     OPTION_REGbits.nRBPU = 0;
     WPUB = TRISB;
     
-    // Read stored settings
-    mode = eeprom_read(EEPROM_MODE);
-    if ((mode != MODE_ANALYSIS) && (mode != MODE_RTC)) {
-        mode = MODE_ANALYSIS;
-        eeprom_write(EEPROM_MODE, mode);
-    }
+    // Setup analog ports for reading
+    ANSEL = 0xFF;
+    TRISA = 0xFF;
+    ADCON0 = 0x81;
+    ADCON1 = 0x00;
+    
+    // Setup USART
+    TXSTAbits.TXEN = 1;
+    TXSTAbits.SYNC = 0;
+    TXSTAbits.BRGH = 1;
+    RCSTAbits.SPEN = 1;
+    SPBRG = 51;
+    PORTC = 0x00;
+    TRISC = 0x80; // Input for TX
+    
+    // Interrupt every 200ms to update ADC readings
+    T1CON = 0x30;
+    INTCONbits.GIE = 1;
+    INTCONbits.PEIE = 1;
+    PIE1bits.TMR1IE = 1;
     
     serial = eeprom_read(EEPROM_SRL);
     if ((serial != 'H') && (serial != 'T')) {
@@ -73,9 +93,9 @@ void main(void) {
     
     lcd_init(true, false, false); // Display on. Cursor and blinking off.
     show_menu_arrows(); // Show up and down menu arrows
-    write_menu_line("Modo: ", mode, true, true);
-    write_menu_line("Serial: ", serial, false, false);
+    write_menu_line("Serial: ", serial, true, true);
     
+    T1CONbits.TMR1ON = 1;
     while (1) {
         pushed_button = read_btn();
         if (pushed_button == SEL_BTN) {
@@ -107,7 +127,7 @@ void main(void) {
             }
         }
         else if (pushed_button == DW_BTN) {
-            if (menu_position < MENU_LAST) {
+            if (menu_position < (MENU_SIZE - 1)) {
                 if (is_odd(menu_position)) {
                     // TODO -- Need to update menu
                 }
@@ -117,6 +137,49 @@ void main(void) {
                 }
             }
         }
+    }
+}
+
+void __interrupt() handle_interrupt() {
+    if (PIR1bits.TMR1IF == 1) {
+        T1CONbits.TMR1ON = 0;
+        read_temp();
+        read_humid();
+    }
+}
+
+void set_adc_channel(uint8_t channel) {
+    ADCON0 &= 0xC3;
+    ADCON0 |= ((channel << 2) & 0x3C);
+}
+
+void read_adc(void) {
+    adc_read_value = 0;
+    ADCON0bits.GO_nDONE = 1;
+    while (ADCON0bits.GO_nDONE == 1);
+    NOP();
+    adc_read_value |= ADRESH;
+    adc_read_value = adc_read_value << 2;
+    adc_read_value |= (ADRESL >> 6);
+}
+
+void read_temp(void) {
+    set_adc_channel(ADC_TEMP_CHN);
+    read_adc();
+    temperature = (uint16_t) (adc_read_value * 48.87585533);
+}
+
+void read_humid(void) {
+    set_adc_channel(ADC_HUMI_CHN);
+    read_adc();
+    temperature = (uint16_t) (adc_read_value * 48.87585533);
+}
+
+void uart_write(char *string) {
+    while (*string != '\0') {
+        while (PIR1bits.TXIF == 0);
+        TXREG = *string;
+        string++;
     }
 }
 
@@ -174,7 +237,7 @@ void show_menu_arrows(void) {
     else {
         lcd_write_char(' ');
     }
-    if (menu_position < (MENU_LAST -1)) {
+    if (menu_position < (MENU_SIZE -1)) {
         lcd_move_cursor(0x4F);
         lcd_write_char(DOWN_ARROW);
     }
