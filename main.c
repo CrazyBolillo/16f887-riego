@@ -23,12 +23,15 @@
 
 #define ADC_TEMP_CHN 0
 #define ADC_HUMI_CHN 1
-
+float HUMIDITY_WET = 1.281;
+float ADC_RES = 0.00488758;
 uint16_t adc_read_value;
 uint16_t temperature;
 char temp_str[5] = {'0', '0', '.', '0', '0'};
 uint16_t humidity;
-char humid_str[5] = {'0', '0', '.', '0', '0'};
+float humidity_voltage;
+float humidity_level;
+char humid_str[5] = {'0', '0', '0', '.', '0'};
 
 #define EEPROM_ST 0x00
 #define ST_ON 'Y'
@@ -53,6 +56,7 @@ uint8_t menu_position = 0;
 uint8_t menu_buffer = 0;
 uint8_t pushed_button;
 
+void menu_loop_bichar(unsigned char *menu, uint8_t eeprom_addr, char opt1, char opt2);
 void update_state(void);
 void set_adc_channel(uint8_t  channel);
 void read_temp(void);
@@ -128,33 +132,10 @@ void main(void) {
             lcd_display(true, false, true);
             switch (menu_position) {
                 case 0: // Status 
-                    menu_buffer = state;
-                    while (1) {
-                        pushed_button = read_btn();
-                        switch (pushed_button) {
-                            case SEL_BTN:
-                                if (menu_buffer != state) {
-                                    state = menu_buffer;
-                                    eeprom_write(EEPROM_ST, state);
-                                    update_menu_char(state);
-                                    lcd_display(true, false, false);
-                                    update_state();
-                                    goto MENU_START;
-                                }
-                                break;
-                            case UP_BTN:
-                            case DW_BTN:
-                                if (menu_buffer == ST_ON) {
-                                    menu_buffer = ST_OFF;
-                                }
-                                else {
-                                    menu_buffer = ST_ON;
-                                }
-                                update_menu_char(menu_buffer);
-                                break;
-                        }
-                        
-                    }
+                    menu_loop_bichar(&state, EEPROM_ST, ST_ON, ST_OFF);
+                    break;
+                case 1: // Serial
+                    menu_loop_bichar(&serial, EEPROM_SRL, SRL_TEMP, SRL_HUMID);
                     break;
             }
         }
@@ -190,6 +171,9 @@ void __interrupt() handle_interrupt() {
         read_humid();
         if (serial == SRL_TEMP) {
             uart_write(temp_str);
+        }
+        else {
+            uart_write(humid_str);
         }
         PIR1bits.TMR1IF = 0;
         TMR1H = 0x80;
@@ -235,7 +219,18 @@ void read_temp(void) {
 void read_humid(void) {
     set_adc_channel(ADC_HUMI_CHN);
     read_adc();
-    temperature = (uint16_t) (adc_read_value * 48.87585533);
+    humidity_voltage = (adc_read_value * ADC_RES);
+    humidity_level = humidity_voltage - HUMIDITY_WET;
+    if (humidity_level <= 0) {
+        humidity = 1000;
+    }
+    else {
+        humidity = (uint16_t) ((humidity_level / 0.00984) * 10);
+    }
+    humid_str[0] = 48 + ((uint8_t)(temperature / 1000));
+    humid_str[1] = 48 + ((uint8_t)((temperature / 100) % 10));
+    humid_str[2] = 48 + ((uint8_t)((temperature / 10) % 10));
+    humid_str[4] = 48 + ((uint8_t)(temperature % 10));
 }
 
 void uart_write(char *string) {
@@ -262,6 +257,36 @@ void select_menu(void) {
         lcd_write_char(' ');
         lcd_move_cursor(0x40);
         lcd_write_char(SELECT_ARROW);
+    }
+}
+
+void menu_loop_bichar(unsigned char *menu, uint8_t eeprom_addr, char opt1, char opt2) {
+    menu_buffer = *menu;
+    while (1) {
+        pushed_button = read_btn();
+        switch (pushed_button) {
+            case SEL_BTN:
+                if (menu_buffer != *menu) {
+                    *menu = menu_buffer;
+                    eeprom_write(eeprom_addr, *menu);
+                    update_menu_char(*menu);
+                    lcd_display(true, false, false);
+                    update_state();
+                    return;
+                }
+                break;
+            case UP_BTN:
+            case DW_BTN:
+                if (menu_buffer == opt1) {
+                    menu_buffer = opt2;
+                }
+                else {
+                    menu_buffer = opt1;
+                }
+                update_menu_char(menu_buffer);
+                break;
+        }
+
     }
 }
 
