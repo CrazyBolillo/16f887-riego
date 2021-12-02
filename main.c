@@ -53,6 +53,7 @@ uint8_t menu_position = 0;
 uint8_t menu_buffer = 0;
 uint8_t pushed_button;
 
+void update_state(void);
 void set_adc_channel(uint8_t  channel);
 void read_temp(void);
 void read_humid(void);
@@ -100,12 +101,7 @@ void main(void) {
         state = ST_ON;
         eeprom_write(state, state);
     }
-    if (state == ST_ON) {
-        PORTCbits.RC5 = 1;
-    }
-    else {
-        PORTCbits.RC5 = 0;
-    }
+    update_state();
     
     serial = eeprom_read(EEPROM_SRL);
     if ((serial != SRL_HUMID) && (serial != SRL_TEMP)) {
@@ -142,6 +138,7 @@ void main(void) {
                                     eeprom_write(EEPROM_ST, state);
                                     update_menu_char(state);
                                     lcd_display(true, false, false);
+                                    update_state();
                                     goto MENU_START;
                                 }
                                 break;
@@ -153,7 +150,7 @@ void main(void) {
                                 else {
                                     menu_buffer = ST_ON;
                                 }
-                                update_menu_char(state);
+                                update_menu_char(menu_buffer);
                                 break;
                         }
                         
@@ -200,9 +197,19 @@ void __interrupt() handle_interrupt() {
     }
 }
 
+void update_state(void) {
+    if (state == ST_ON) {
+        PORTCbits.RC5 = 1;
+    }
+    else {
+        PORTCbits.RC5 = 0;
+    }
+}
+
 void set_adc_channel(uint8_t channel) {
     ADCON0 &= 0xC3;
     ADCON0 |= ((channel << 2) & 0x3C);
+    __delay_us(20);
 }
 
 void read_adc(void) {
@@ -259,13 +266,13 @@ void select_menu(void) {
 }
 
 void update_menu_char(char value) {
+    uint8_t cursor = 0x00;
     if (is_odd(menu_position)) {
-        lcd_move_cursor(0x40 + MENU_OPTION);
+        cursor = 0x40;
     }
-    else {
-        lcd_move_cursor(0x00 + MENU_OPTION);
-    }
+    lcd_move_cursor(cursor + MENU_OPTION);
     lcd_write_char(value);
+    lcd_move_cursor(cursor + MENU_OPTION);
 }
 
 void write_menu_line(char *string, char value, bool top, bool selected) {
