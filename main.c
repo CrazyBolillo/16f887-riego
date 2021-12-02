@@ -65,6 +65,7 @@ uint8_t menu_position = 1;
 uint8_t displayed_menus = 12; // First digit represents top menu. Second one bottom menu.
 uint8_t menu_buffer = 0;
 uint8_t pushed_button;
+uint8_t cursor;
 
 #define WATER_VALVE PORTCbits.RC1 = PORTCbits.RC2
 
@@ -76,7 +77,7 @@ void read_humid(void);
 void uart_write(char *string);
 void show_menu_arrows(void);
 void select_menu(void);
-void update_menu_char(uint8_t cursor, char value);
+void update_menu_char(char value);
 void write_menu_line(char *string, char value, bool top, bool selected, bool is_int);
 uint8_t read_btn(void);
 
@@ -140,7 +141,6 @@ void main(void) {
         MENU_START:
         pushed_button = read_btn();
         if (pushed_button == SEL_BTN) {
-            lcd_display(true, false, true);
             switch (menu_position) {
                 case 1: // Status 
                     menu_loop_bichar(&state, EEPROM_ST, ST_ON, ST_OFF);
@@ -150,6 +150,37 @@ void main(void) {
                     menu_loop_bichar(&serial, EEPROM_SRL, SRL_TEMP, SRL_HUMID);
                     break;
                 case 3: // Trigger
+                    pushed_button = 0;
+                    cursor = 0x00;
+                    if (displayed_menus == 23) {
+                        cursor = 0x40;
+                    }
+                    lcd_move_cursor(cursor);
+                    lcd_display(true, false, true);
+                    menu_buffer = trigger;
+                    while (pushed_button != SEL_BTN) {
+                        pushed_button = read_btn();
+                        switch (pushed_button) {
+                            case UP_BTN:
+                                menu_buffer++;
+                                lcd_move_cursor(cursor + MENU_OPTION);
+                                lcd_write_uint8(menu_buffer);
+                                lcd_move_cursor(cursor);
+                                break;
+                            case DW_BTN:
+                                menu_buffer--;
+                                lcd_move_cursor(cursor + MENU_OPTION);
+                                lcd_write_uint8(menu_buffer);
+                                lcd_move_cursor(cursor);
+                                break;
+                        }
+                        
+                    }
+                    if (menu_buffer != trigger) {
+                        eeprom_write(EEPROM_TRIG, menu_buffer);
+                        trigger = menu_buffer;
+                    }
+                    lcd_display(true, false, false);
                     break;
                 case 4: // Show data
                     lcd_clear_display();
@@ -166,10 +197,10 @@ void main(void) {
                         lcd_write_string(humid_str);
                     }
                     lcd_clear_display();
-                    displayed_menus = 12;
-                    menu_position = 1;
-                    write_menu_line(ST_LEGEND, state, true, true, false);
-                    write_menu_line(SRL_LEGEND, serial, false, false, false);
+                    displayed_menus = 34;
+                    menu_position = 4;
+                    write_menu_line(TRIG_LEGEND, trigger, true, false, true);
+                    write_menu_line(DATA_LEGEND, ' ', false, true, false);
                     show_menu_arrows(); // Show up and down menu arrows
                     __delay_ms(200);
                     break;
@@ -355,7 +386,7 @@ void select_menu(void) {
 
 void menu_loop_bichar(unsigned char *menu, uint8_t eeprom_addr, char opt1, char opt2) {
     menu_buffer = *menu;
-    uint8_t cursor = 0x40;
+    cursor = 0x40;
     switch (displayed_menus) {
         case 12:
             if (is_odd(menu_position)) {
@@ -374,6 +405,7 @@ void menu_loop_bichar(unsigned char *menu, uint8_t eeprom_addr, char opt1, char 
             break;
     }
     lcd_move_cursor(cursor);
+    lcd_display(true, false, true);
     while (1) {
         pushed_button = read_btn();
         switch (pushed_button) {
@@ -381,7 +413,7 @@ void menu_loop_bichar(unsigned char *menu, uint8_t eeprom_addr, char opt1, char 
                 if (menu_buffer != *menu) {
                     *menu = menu_buffer;
                     eeprom_write(eeprom_addr, *menu);
-                    update_menu_char(cursor, *menu);
+                    update_menu_char(*menu);
                     
                 }
                 lcd_display(true, false, false);
@@ -394,21 +426,21 @@ void menu_loop_bichar(unsigned char *menu, uint8_t eeprom_addr, char opt1, char 
                 else {
                     menu_buffer = opt1;
                 }
-                update_menu_char(cursor, menu_buffer);
+                update_menu_char(menu_buffer);
                 break;
         }
 
     }
 }
 
-void update_menu_char(uint8_t cursor, char value) {
+void update_menu_char(char value) {
     lcd_move_cursor(cursor + MENU_OPTION);
     lcd_write_char(value);
     lcd_move_cursor(cursor);
 }
 
 void write_menu_line(char *string, char value, bool top, bool selected, bool is_int) {
-    uint8_t cursor = 0x00;
+    cursor = 0x00;
     uint8_t select = ' ';
     if (top == false) {
         cursor = 0x40;
@@ -423,9 +455,7 @@ void write_menu_line(char *string, char value, bool top, bool selected, bool is_
     lcd_write_string(string);
     lcd_move_cursor(cursor + MENU_OPTION);
     if (is_int == true) {
-        lcd_write_char(48 + ((uint8_t)((value / 100) % 10)));
-        lcd_write_char(48 + ((uint8_t)((value / 10) % 10)));
-        lcd_write_char(48 + ((uint8_t)(value % 10)));
+        lcd_write_uint8(value);
     }
     else {
         lcd_write_char(value);

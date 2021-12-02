@@ -25,6 +25,7 @@ void lcd_init(bool display, bool cursor, bool blink);
 void lcd_display(bool display, bool cursor, bool blink);
 void lcd_write_string(char *string);
 void lcd_write_char(char character);
+void lcd_write_uint8(uint8_t number);
 void lcd_move_cursor(uint8_t address);
 void lcd_clear_display(void);
 void lcd_create_char(uint8_t address, uint8_t *bitmap);

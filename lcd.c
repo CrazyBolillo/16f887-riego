@@ -52,8 +52,14 @@ void lcd_write_string(char *string) {
     }
 }
 
-void lcd_write_char(char data) {
-    lcd_send(true, data);
+void lcd_write_char(char character) {
+    lcd_send(true, character);
+}
+
+void lcd_write_uint8(uint8_t number) {
+    lcd_write_char(48 + ((uint8_t)((number / 100) % 10)));
+    lcd_write_char(48 + ((uint8_t)((number / 10) % 10)));
+    lcd_write_char(48 + ((uint8_t)(number % 10)));
 }
 
 void lcd_move_cursor(uint8_t address) {
